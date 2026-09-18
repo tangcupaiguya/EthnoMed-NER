@@ -50,12 +50,12 @@ entities = student.predict(batch, window_batch_size=8)
 
 ## Sample data
 
-[examples/sample.jsonl](examples/sample.jsonl) contains five training-set examples covering all nine entity types. Each line has `id`, `text` and `entities`; each entity uses zero-based `start`, exclusive `end` and `label`. IDs retain the original record number with a `train-` prefix. The source BIO tag `Pharmacopeia` is normalized to `Pharmacopoeia`.
+[data/sample.jsonl](data/sample.jsonl) contains five training-set examples covering all nine entity types. Each line has `id`, `text` and `entities`; each entity uses zero-based `start`, exclusive `end` and `label`. IDs retain the original record number with a `train-` prefix. The source BIO tag `Pharmacopeia` is normalized to `Pharmacopoeia`.
 
 ```python
 from ethnomed_ner import EthnoMedDataset, WindowCollator
 
-dataset = EthnoMedDataset("examples/sample.jsonl", tokenizer)
+dataset = EthnoMedDataset("data/sample.jsonl", tokenizer)
 batch = WindowCollator(tokenizer)(list(dataset))
 ```
 
