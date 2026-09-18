@@ -1,4 +1,4 @@
-"""Core modules for BADP, reconstructed from the revised manuscript."""
+"""Core modules for BADP."""
 
 from .config import BADPConfig
 from .labels import ENTITY_TYPES, LABELS

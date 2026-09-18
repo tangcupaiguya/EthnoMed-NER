@@ -29,20 +29,18 @@ def reverse_valid_tokens(value, mask):
 
 
 class BidirectionalMamba3(nn.Module):
-    """Table 6 bidirectional wrapper; the original Mamba-3 backend is supplied by caller.
+    """Table 6 bidirectional wrapper with a caller-supplied Mamba-3 factory.
 
     mixer_factory(config) must return a fresh causal Mamba-3 MIMO module mapping
     [batch, length, model_dim] to the same shape, without an outer residual.
-    The factory is called independently for the two directions. No state-size
-    conversion or unknown kernel configuration is guessed in this core release.
+    The factory is called independently for the two directions.
     """
 
     def __init__(self, config, mixer_factory=None):
         super().__init__()
         if mixer_factory is None:
             raise ValueError(
-                "Supply mixer_factory with the original Mamba-3 MIMO configuration. "
-                "Its complex-to-real state-size mapping is pending confirmation; see README.md."
+                "mixer_factory must construct a fresh causal Mamba-3 MIMO module"
             )
         self.forward_mixer = mixer_factory(config)
         self.backward_mixer = mixer_factory(config)
