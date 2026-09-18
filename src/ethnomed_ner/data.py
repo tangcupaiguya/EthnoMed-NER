@@ -5,7 +5,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import Dataset
 
-from .labels import ENTITY_TYPES, LABEL_TO_ID
+from .labels import ENTITY_TYPES, LABEL_TO_ID, LABELS
 
 
 @dataclass(frozen=True, order=True)
@@ -13,6 +13,34 @@ class Span:
     start: int
     end: int
     label: str
+
+
+def decode_spans(tag_ids, offsets):
+    """Convert BIO IDs to character spans with exclusive ends.
+
+    An I tag without a matching preceding entity starts a new span.
+    """
+    if len(tag_ids) != len(offsets):
+        raise ValueError("Tags and character offsets must have the same length")
+    spans = []
+    active = None
+    previous_end = 0
+    for tag_id, (start, end) in zip(tag_ids, offsets):
+        if not 0 <= tag_id < len(LABELS):
+            raise ValueError("Tag IDs must index LABELS")
+        if not previous_end <= start < end:
+            raise ValueError("Token offsets must be ordered and non-overlapping")
+        previous_end = end
+        tag = LABELS[tag_id]
+        if tag == "O":
+            active = None
+        elif tag.startswith("I-") and active is not None and active.label == tag[2:]:
+            active = Span(active.start, end, active.label)
+            spans[-1] = active
+        else:
+            active = Span(start, end, tag[2:])
+            spans.append(active)
+    return spans
 
 
 def project_flat_spans(spans, text_length):
@@ -132,6 +160,8 @@ class WindowCollator:
             raise ValueError("Use right padding for shared encoder windows")
 
     def __call__(self, records):
+        if not records or any(not record["input_ids"] for record in records):
+            raise ValueError("A batch must contain nonempty token sequences")
         max_length = max(len(record["input_ids"]) for record in records)
         labels = torch.full((len(records), max_length), -100, dtype=torch.long)
         mask = torch.zeros_like(labels, dtype=torch.bool)
@@ -183,16 +213,28 @@ def move_batch(batch, device):
     }
 
 
-def encode_windows(backbone, batch):
-    hidden = backbone(**batch["windows"]).last_hidden_state
+def encode_windows(backbone, batch, *, window_batch_size=None):
+    """Pool overlapping window states; optional batching bounds backbone inference memory."""
     mapping = batch["window_mapping"]
-    valid = mapping >= 0
+    window_count = mapping.shape[0]
+    if window_batch_size is None:
+        window_batch_size = window_count
+    if window_count == 0 or not isinstance(window_batch_size, int) or window_batch_size <= 0:
+        raise ValueError("window_batch_size and the number of windows must be positive")
     batch_size, length = batch["mask"].shape
-    # Float32 accumulation avoids low-precision errors where overlapping windows are averaged.
-    merged = hidden.new_zeros((batch_size * length, hidden.shape[-1]), dtype=torch.float32)
-    merged = merged.index_add(0, mapping[valid], hidden[valid].float())
-    counts = hidden.new_zeros(batch_size * length, dtype=torch.float32)
-    counts.index_add_(0, mapping[valid], torch.ones_like(mapping[valid], dtype=torch.float32))
+    merged = None
+    counts = mapping.new_zeros(batch_size * length, dtype=torch.float32)
+    for start in range(0, window_count, window_batch_size):
+        end = start + window_batch_size
+        inputs = {key: value[start:end] for key, value in batch["windows"].items()}
+        hidden = backbone(**inputs).last_hidden_state
+        indices = mapping[start:end]
+        valid = indices >= 0
+        # Float32 accumulation preserves the document-level mean across window batches.
+        if merged is None:
+            merged = hidden.new_zeros((batch_size * length, hidden.shape[-1]), dtype=torch.float32)
+        merged = merged.index_add(0, indices[valid], hidden[valid].float())
+        counts.index_add_(0, indices[valid], torch.ones_like(indices[valid], dtype=torch.float32))
     if (counts.view(batch_size, length)[batch["mask"]] == 0).any():
         raise ValueError("Uncovered content token in the window mapping")
     return (

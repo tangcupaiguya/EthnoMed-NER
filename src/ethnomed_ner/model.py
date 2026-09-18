@@ -5,7 +5,7 @@ from torch import nn
 from torchcrf import CRF
 
 from .boundary import BoundaryPrior, initialize_linear
-from .data import encode_windows
+from .data import decode_spans, encode_windows
 from .encoder import BidirectionalMamba3, validate_mask
 from .labels import LABELS
 
@@ -35,6 +35,7 @@ class BADP(nn.Module):
         self.stage = None
 
     def set_stage(self, stage):
+        """Apply Algorithm 1 freezing; construct the optimizer after each stage switch."""
         if stage not in (1, 2):
             raise ValueError("BADP stage must be 1 or 2")
         if self.config.lora:
@@ -45,10 +46,15 @@ class BADP(nn.Module):
             self.backbone.get_input_embeddings().requires_grad_(stage == 2)
         self.state_projection.requires_grad_(stage == 1)
         self.crf.requires_grad_(stage == 2)
+        # Optimizers can still update frozen parameters when an old gradient remains.
+        for parameter in self.parameters():
+            if not parameter.requires_grad:
+                parameter.grad = None
         self.stage = stage
+        return self
 
-    def forward(self, batch):
-        hidden = encode_windows(self.backbone, batch)
+    def forward(self, batch, *, window_batch_size=None):
+        hidden = encode_windows(self.backbone, batch, window_batch_size=window_batch_size)
         inputs, bio_logits = self.boundary(hidden)
         states = self.encoder(inputs, batch["mask"])
         return NEROutput(states, self.classifier(self.dropout(states)), bio_logits)
@@ -64,6 +70,24 @@ class BADP(nn.Module):
         validate_mask(mask)
         return self.crf.decode(output.logits.float(), mask=mask)
 
+    @torch.inference_mode()
+    def predict(self, batch, *, window_batch_size=None):
+        """Return one list of character-offset Span objects per document."""
+        modes = [(module, module.training) for module in self.modules()]
+        self.eval()
+        try:
+            output = self(batch, window_batch_size=window_batch_size)
+            tags = self.decode(output, batch["mask"])
+            if len(tags) != len(batch["records"]):
+                raise ValueError("Each decoded sequence must have a document record")
+            return [
+                decode_spans(sequence, record["offsets"])
+                for sequence, record in zip(tags, batch["records"])
+            ]
+        finally:
+            for module, training in modes:
+                module.training = training
+
 
 class NERTeacher(nn.Module):
     def __init__(self, backbone, hidden_size=768):
@@ -73,15 +97,22 @@ class NERTeacher(nn.Module):
         self.backbone = backbone
         self.classifier = nn.Linear(hidden_size, len(LABELS))
         initialize_linear(self.classifier)
+        self._frozen = False
 
-    def forward(self, batch):
-        hidden = encode_windows(self.backbone, batch)
+    def forward(self, batch, *, window_batch_size=None):
+        hidden = encode_windows(self.backbone, batch, window_batch_size=window_batch_size)
         return NEROutput(hidden, self.classifier(hidden))
 
     def freeze(self):
+        self._frozen = True
         self.requires_grad_(False)
+        self.zero_grad(set_to_none=True)
         self.eval()
         return self
+
+    def train(self, mode=True):
+        """Keep a frozen distillation teacher in evaluation mode."""
+        return super().train(False if self._frozen else mode)
 
 
 def load_backbone(name, dropout=0.1):
