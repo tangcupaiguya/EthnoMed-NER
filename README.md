@@ -2,7 +2,7 @@
 
 Core implementation accompanying **BADP: Ethnomedicine Named Entity Recognition via Boundary-Aware Mamba and Decoupled Procedural Distillation** (`ASOC-D-26-07132_R1.pdf`).
 
-This release contains the boundary-prior components, two-stage objectives, parameter-freezing schedule, CRF and token-alignment utilities described in the revised manuscript. It also provides a bidirectional encoder interface. The original Mamba-3 backend configuration remains to be confirmed and is intentionally supplied by the caller. See [the manuscript-to-code mapping](docs/method_mapping.md) for details.
+This release contains the boundary-prior components, two-stage objectives, parameter-freezing schedule, CRF and token-alignment utilities described in the revised manuscript. It also provides a bidirectional encoder interface. See [the manuscript-to-code mapping](docs/method_mapping.md) for details.
 
 ## Architecture
 
