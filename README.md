@@ -48,6 +48,17 @@ entities = student.predict(batch, window_batch_size=8)
 
 `predict` runs CRF decoding in evaluation mode and restores the prior model mode. Window batches are pooled into full-document states before bidirectional encoding. A frozen teacher stays in evaluation mode during distillation.
 
+## Sample data
+
+[examples/sample.jsonl](examples/sample.jsonl) contains five training-set examples covering all nine entity types. Each line has `id`, `text` and `entities`; each entity uses zero-based `start`, exclusive `end` and `label`. IDs retain the original record number with a `train-` prefix. The source BIO tag `Pharmacopeia` is normalized to `Pharmacopoeia`.
+
+```python
+from ethnomed_ner import EthnoMedDataset, WindowCollator
+
+dataset = EthnoMedDataset("examples/sample.jsonl", tokenizer)
+batch = WindowCollator(tokenizer)(list(dataset))
+```
+
 ## Engineering references
 
 [Transformers](https://github.com/huggingface/transformers) for character-offset entity outputs, [Flair](https://github.com/flairNLP/flair) for NER prediction interfaces, and [Mamba](https://github.com/state-spaces/mamba) for modular sequence mixers and RMSNorm.
